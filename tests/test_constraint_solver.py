@@ -13,7 +13,7 @@ def test_make_constraint(golden):
         assert ((a * 4 + b > c) or (a <= 3)) and (b < 5)
         pass
 
-    foo_type = TypeVisitor({})
+    foo_type = TypeVisitor()
     foo_type.visit(foo._loopir_proc)
     assert (
         golden
@@ -29,7 +29,38 @@ def test_solve(golden):
         assert ((a * 4 + b > c) or (a <= 3)) and (b < 5)
         pass
 
-    foo_type = TypeVisitor({})
+    foo_type = TypeVisitor()
+    foo_type.visit(foo._loopir_proc)
+    cm = ConstraintMaker(foo_type.type_map)
+    constraint = cm.make_constraint(foo._loopir_proc.preds[0])
+    assert golden == ", ".join(
+        [
+            f"{str(sym)} = {val}"
+            for sym, val in cm.solve_constraint(constraint, 16, 13).items()
+        ]
+    )
+
+
+def test_divmod(golden):
+    @proc
+    def foo(a: size, b: size, c: size):
+        assert ((a * 4 + b > c) or (a <= 3)) and (b < 5) and (a % 4 == 3)
+        pass
+
+    foo_type = TypeVisitor()
+    foo_type.visit(foo._loopir_proc)
+    cm = ConstraintMaker(foo_type.type_map)
+    constraint = cm.make_constraint(foo._loopir_proc.preds[0])
+    assert golden == constraint.pretty_print()
+
+
+def test_divmod_solve(golden):
+    @proc
+    def foo(a: size, b: size, c: size):
+        assert ((a * 4 + b > c) or (a <= 3)) and (b < 5) and (a % 4 == 3)
+        pass
+
+    foo_type = TypeVisitor()
     foo_type.visit(foo._loopir_proc)
     cm = ConstraintMaker(foo_type.type_map)
     constraint = cm.make_constraint(foo._loopir_proc.preds[0])

@@ -1,8 +1,9 @@
 from typing import Optional
+
 from ..core.LoopIR import LoopIR, T
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from ..core.prelude import Sym, SrcInfo
-from ..core.memory import DRAM
+from ..core.memory import DRAM, Memory
 from ..backend.LoopIR_interpreter import run_interpreter
 import numpy as np
 from .new_eff import SchedulingError
@@ -42,7 +43,8 @@ class LoopIRVisitor:
 
 @dataclass
 class TypeVisitor(LoopIRVisitor):
-    type_map: dict[Sym, LoopIR.type]
+    type_map: dict[Sym, LoopIR.type] = field(default_factory=lambda: {})
+    mem_map: dict[Sym, Memory] = field(default_factory=lambda: {})
 
     def visit(self, node):
         if isinstance(node, LoopIR.For):
@@ -50,17 +52,20 @@ class TypeVisitor(LoopIRVisitor):
             self.visit_generic(node)
         elif isinstance(node, LoopIR.Alloc):
             self.type_map[node.name] = node.type
+            self.mem_map[node.name] = node.mem
         elif isinstance(node, LoopIR.WindowStmt):
             self.type_map[node.name] = node.rhs.type
         elif isinstance(node, LoopIR.fnarg):
             self.type_map[node.name] = node.type
+            if node.mem:
+                self.mem_map[node.name] = node.mem
         else:
             self.visit_generic(node)
 
 
 @dataclass
 class UsedVariableVisitor(LoopIRVisitor):
-    used_vars: set[Sym]
+    used_vars: set[Sym] = field(default_factory=lambda: set())
 
     def visit(self, node):
         if isinstance(node, Sym):
@@ -69,16 +74,16 @@ class UsedVariableVisitor(LoopIRVisitor):
             self.visit_generic(node)
 
 
-def get_free_variables(type_map, fragment):
-    fragment_type_visitor = TypeVisitor({})
-    fragment_var_visitor = UsedVariableVisitor(set())
+def get_free_variables(type_map, mem_map, fragment):
+    fragment_type_visitor = TypeVisitor()
+    fragment_var_visitor = UsedVariableVisitor()
     for stmt in fragment:
         fragment_type_visitor.visit(stmt)
         fragment_var_visitor.visit(stmt)
     for var in fragment_var_visitor.used_vars - fragment_type_visitor.type_map.keys():
         fragment_var_visitor.visit(type_map[var])
     return {
-        var: type_map[var]
+        var: (type_map[var], mem_map[var] if var in mem_map else None)
         for var in fragment_var_visitor.used_vars
         - fragment_type_visitor.type_map.keys()
     }
@@ -223,7 +228,7 @@ TEST_CASE_BOUND = 10
 
 def fuzz_reorder_stmts(s1, s2):
     proc = s1.get_root()
-    proc_type_visitor = TypeVisitor({})
+    proc_type_visitor = TypeVisitor()
     proc_type_visitor.visit(proc)
     cm = ConstraintMaker(proc_type_visitor.type_map)
     constraint = Constraint(())
@@ -231,9 +236,14 @@ def fuzz_reorder_stmts(s1, s2):
         constraint = ConjunctionConstraint(constraint, cm.make_constraint(pred))
     constraint = ConjunctionConstraint(constraint, collect_path_constraints(s1, cm))
     args = [
-        LoopIR.fnarg(name=var, type=arg_type, mem=DRAM, srcinfo=SrcInfo("", 0))
-        for var, arg_type in get_free_variables(
-            proc_type_visitor.type_map, [s1._node, s2._node]
+        LoopIR.fnarg(
+            name=var,
+            type=arg_type,
+            mem=DRAM if arg_mem is None else arg_mem,
+            srcinfo=SrcInfo("", 0),
+        )
+        for var, (arg_type, arg_mem) in get_free_variables(
+            proc_type_visitor.type_map, proc_type_visitor.mem_map, [s1._node, s2._node]
         ).items()
     ]
     args = [arg for arg in args if not arg.type.is_numeric()] + [

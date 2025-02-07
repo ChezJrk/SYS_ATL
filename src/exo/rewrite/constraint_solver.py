@@ -121,7 +121,7 @@ class Constraint:
         return (
             " + ".join(
                 [
-                    f"{' * '.join([str(term.coefficient)] + [repr(sym) for sym in term.syms])}"
+                    f"{' * '.join([str(term.coefficient)] + [str(sym) for sym in term.syms])}"
                     for term in self.terms
                 ]
             )

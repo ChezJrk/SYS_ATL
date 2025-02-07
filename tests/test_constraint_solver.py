@@ -33,4 +33,9 @@ def test_solve(golden):
     foo_type.visit(foo._loopir_proc)
     cm = ConstraintMaker(foo_type.type_map)
     constraint = cm.make_constraint(foo._loopir_proc.preds[0])
-    assert golden == str(cm.solve_constraint(constraint, 16, 13))
+    assert golden == ", ".join(
+        [
+            f"{str(sym)} = {val}"
+            for sym, val in cm.solve_constraint(constraint, 16, 13).items()
+        ]
+    )

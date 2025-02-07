@@ -32,6 +32,7 @@ from .new_eff import (
     Check_ExprBound,
     Check_Aliasing,
 )
+from .chexo import fuzz_reorder_stmts
 
 from .range_analysis import IndexRangeEnvironment, IndexRange, index_range_analysis
 
@@ -206,7 +207,7 @@ def _replace_pats(ir, fwd, c, pat, repl, only_replace_attrs=True, use_sym_id=Tru
             todos.append((rd, c_repl))
 
     cur_fwd = lambda x: x
-    for (rd, c_repl) in todos:
+    for rd, c_repl in todos:
         rd = cur_fwd(rd)
         ir, fwd_rd = _replace_helper(rd, c_repl, only_replace_attrs)
         cur_fwd = _compose(fwd_rd, cur_fwd)
@@ -222,7 +223,7 @@ def _replace_reads(ir, fwd, c, sym, repl, only_replace_attrs=True):
             todos.append((rd, c_repl))
 
     cur_fwd = lambda x: x
-    for (rd, c_repl) in todos:
+    for rd, c_repl in todos:
         rd = cur_fwd(rd)
         ir, fwd_rd = _replace_helper(rd, c_repl, only_replace_attrs)
         cur_fwd = _compose(fwd_rd, cur_fwd)
@@ -249,7 +250,7 @@ def _replace_writes(
             todos.append((s, c_repl))
 
     cur_fwd = lambda x: x
-    for (s, c_repl) in todos:
+    for s, c_repl in todos:
         s = cur_fwd(s)
         ir, fwd_s = _replace_helper(s, c_repl, only_replace_attrs)
         cur_fwd = _compose(fwd_s, cur_fwd)
@@ -375,7 +376,8 @@ def DoReorderStmt(f_cursor, s_cursor):
         raise SchedulingError(
             "expected the second statement to be directly after the first"
         )
-    Check_ReorderStmts(f_cursor.get_root(), f_cursor._node, s_cursor._node)
+    # Check_ReorderStmts(f_cursor.get_root(), f_cursor._node, s_cursor._node)
+    fuzz_reorder_stmts(f_cursor, s_cursor)
     ir, fwd = s_cursor._move(f_cursor.before())
     return ir, fwd
 

@@ -25,4 +25,8 @@ configure
 
 dependencies/chipyard
 
+examples/*.c
+examples/*.d
+examples/*.h
+
 .vscode

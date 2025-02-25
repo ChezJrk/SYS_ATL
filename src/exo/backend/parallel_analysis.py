@@ -13,7 +13,7 @@ class ParallelAnalysis(LoopIR_Rewrite):
         proc = super().apply_proc(proc)
         if self._errors:
             errs = "\n".join(self._errors)
-            raise TypeError(f"Errors occurred during precision checking:\n{errs}")
+            raise TypeError(f"Errors occurred during parallel analysis:\n{errs}")
         return proc
 
     def err(self, node, msg):

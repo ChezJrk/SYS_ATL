@@ -30,6 +30,9 @@ extern "C" {
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #ifndef EXO_WIN_2I32
 #define EXO_WIN_2I32
 struct exo_win_2i32{
@@ -59,9 +62,6 @@ void exo_conv1d_tile_lt_kw( void *ctxt, const int32_t* data, const int32_t* kern
 #endif  // TEST_CASE_H
 
 #include "test_case.h"
-
-#include <stdio.h>
-#include <stdlib.h>
 
 #include <stdio.h>
 #include <stdlib.h>

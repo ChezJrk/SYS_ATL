@@ -3,13 +3,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from typing import List, Any
+from typing import List, Any, Optional, Type
 
 from . import API  # TODO: remove this circular import
 from .API_types import ExoType, loopir_type_to_exotype
 from .core.LoopIR import LoopIR
 from .core.configs import Config
-from .core.memory import Memory
+from .core.memory import MemWin, Memory, SpecialWindow
 
 from .core import internal_cursors as C
 from .frontend.pattern_match import match_pattern
@@ -65,7 +65,7 @@ class Cursor(ABC):
                | For( name : str, hi : Expr, body : Block )
                | Alloc( name : str, mem : Memory? )
                | Call( subproc : Procedure, args : ExprList )
-               | WindowStmt( name : str, winexpr : WindowExpr )
+               | WindowStmt( name : str, winexpr : WindowExpr, special_window : SpecialWindow? )
 
         Expr ::= Read( name : str, idx : ExprList )
                | ReadConfig( config : Config, field : str )
@@ -203,13 +203,13 @@ class ArgCursor(Cursor):
 
         return self._impl._node.name.name()
 
-    def mem(self) -> Memory:
+    def mem(self) -> MemWin:
         assert isinstance(self._impl, C.Node)
         assert isinstance(self._impl._node, LoopIR.fnarg)
         assert not self._impl._node.type.is_indexable()
 
         mem = self._impl._node.mem
-        assert issubclass(mem, Memory)
+        assert issubclass(mem, MemWin)
         return mem
 
     def is_tensor(self) -> bool:
@@ -657,7 +657,7 @@ class WindowStmtCursor(StmtCursor):
     """
     Cursor pointing to a window declaration statement:
         ```
-        name = winexpr
+        name = winexpr @ special_window
         ```
     """
 
@@ -672,6 +672,13 @@ class WindowStmtCursor(StmtCursor):
         assert isinstance(self._impl._node, LoopIR.WindowStmt)
 
         return WindowExprCursor(self._impl._child_node("rhs"), self._proc)
+
+    def special_window(self) -> Optional[Type[SpecialWindow]]:
+        assert isinstance(self._impl, C.Node)
+        assert isinstance(self._impl._node, LoopIR.WindowStmt)
+        special_window = self._impl._node.special_window
+        assert issubclass(special_window, SpecialWindow)
+        return special_window
 
 
 # --------------------------------------------------------------------------- #

@@ -13,7 +13,7 @@ from .core import LoopIR as LoopIR
 from .backend.LoopIR_compiler import run_compile, compile_to_strings
 from .core.configs import Config
 from .frontend.boundscheck import CheckBounds
-from .core.memory import Memory
+from .core.memory import MemWin, Memory, SpecialWindow
 from .frontend.parse_fragment import parse_fragment
 from .frontend.pattern_match import match_pattern
 from .core.prelude import *

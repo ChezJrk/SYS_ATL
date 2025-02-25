@@ -30,6 +30,9 @@ extern "C" {
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 
 // foo(
 //     N : size,
@@ -45,9 +48,6 @@ void foo( void *ctxt, int_fast32_t N, float* x );
 #endif  // TEST_H
 
 #include "test.h"
-
-#include <stdio.h>
-#include <stdlib.h>
 
 // foo(
 //     N : size,

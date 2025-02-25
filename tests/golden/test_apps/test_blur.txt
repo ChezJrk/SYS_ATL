@@ -30,6 +30,9 @@ extern "C" {
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #ifndef EXO_WIN_1UI16
 #define EXO_WIN_1UI16
 struct exo_win_1ui16{
@@ -73,9 +76,20 @@ void exo_blur_halide( void *ctxt, int_fast32_t W, int_fast32_t H, uint16_t* blur
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-
+#ifndef EXO_WIN_1UI16_AVX2
+#define EXO_WIN_1UI16_AVX2
+struct exo_win_1ui16_AVX2{
+    __m256i * const data;
+    const int_fast32_t strides[1];
+};
+#endif
+#ifndef EXO_WIN_1UI16C_AVX2
+#define EXO_WIN_1UI16C_AVX2
+struct exo_win_1ui16c_AVX2{
+    const __m256i * const data;
+    const int_fast32_t strides[1];
+};
+#endif
 
 /* relying on the following instruction..."
 avx2_ui16_divide_by_3(out,x)

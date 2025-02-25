@@ -7,9 +7,6 @@ def foo(a: i32 @ DRAM):
 C:
 #include "test.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-
 // foo(
 //     a : i32 @DRAM
 // )

@@ -30,6 +30,9 @@ extern "C" {
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #ifndef EXO_WIN_1F32
 #define EXO_WIN_1F32
 struct exo_win_1f32{
@@ -62,9 +65,20 @@ void conv_specialized( void *ctxt, const float* inp, float* output, const float*
 #include "test_case.h"
 
 #include <immintrin.h>
-#include <stdio.h>
-#include <stdlib.h>
-
+#ifndef EXO_WIN_1F32_AVX512
+#define EXO_WIN_1F32_AVX512
+struct exo_win_1f32_AVX512{
+    __m512 * const data;
+    const int_fast32_t strides[1];
+};
+#endif
+#ifndef EXO_WIN_1F32C_AVX512
+#define EXO_WIN_1F32C_AVX512
+struct exo_win_1f32c_AVX512{
+    const __m512 * const data;
+    const int_fast32_t strides[1];
+};
+#endif
 // conv_specialized(
 //     inp : f32[5, 82, 102, 128] @DRAM,
 //     output : f32[5, 80, 100, 128] @DRAM,

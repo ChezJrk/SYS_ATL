@@ -685,7 +685,6 @@ def test_memcpy_instr(compiler, golden):
     optimized_bar = replace(bar, bar.body()[0], memcpy)
 
     bar_c, bar_h = compile_procs_to_strings([optimized_bar], "bar.h")
-
     assert f"{bar_c}\n{bar_h}" == golden
 
     fn = compiler.compile(optimized_bar)

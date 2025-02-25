@@ -209,7 +209,7 @@ class TypeChecker:
 
     def check_single_stmt(self, stmt):
         if isinstance(stmt, UAST.FreshAssign):
-            rhs = self.check_e(stmt.rhs)
+            rhs = self.check_e(stmt.rhs, allow_special_window=True)
 
             # We see a statement of the form
             #   nm = ...
@@ -223,7 +223,11 @@ class TypeChecker:
             elif isinstance(rhs.type, T.Window):
                 assert isinstance(rhs, LoopIR.WindowExpr)
                 self.env[stmt.name] = rhs.type
-                return [LoopIR.WindowStmt(stmt.name, rhs, stmt.srcinfo)]
+                return [
+                    LoopIR.WindowStmt(
+                        stmt.name, rhs, stmt.rhs.special_window, stmt.srcinfo
+                    )
+                ]
             else:
                 self.err(
                     stmt,
@@ -377,7 +381,7 @@ class TypeChecker:
 
             return LoopIR.Interval(lo, hi, e.srcinfo)
 
-    def check_e(self, e, is_index=False):
+    def check_e(self, e, is_index=False, allow_special_window=False):
         if isinstance(e, UAST.Read):
             typ = self.env[e.name]
             # if we only partially accessed the base tensor/window,
@@ -391,7 +395,7 @@ class TypeChecker:
                     for _ in range(0, len(typ.shape()) - len(e.idx))
                 ]
 
-                desugared = UAST.WindowExpr(e.name, idxs, e.srcinfo)
+                desugared = UAST.WindowExpr(e.name, idxs, None, e.srcinfo)
                 return self.check_e(desugared)
 
             # otherwise, we have a normal access
@@ -408,6 +412,24 @@ class TypeChecker:
                     f"non-window type {e.base}",
                 )
                 return LoopIR.WindowExpr(e.name, [], T.err, e.srcinfo)
+
+            if e.special_window is not None:
+                # UAST has the optional special window as part of WindowExpr as
+                # that's how it parses, but LoopIR has the special window as
+                # part of WindowStmt since that matches the usage pattern
+                # (can't construct special windows just anywhere)
+                if not allow_special_window:
+                    self.err(
+                        e,
+                        f"Can only create SpecialWindow as part of "
+                        f"WindowStmt (W = t[idx...] @ SpecialWindow)",
+                    )
+                elif not in_typ.is_dense_tensor():
+                    self.err(
+                        e,
+                        "Can only create SpecialWindow from a dense "
+                        "tensor, not another window",
+                    )
 
             in_shape = in_typ.shape()
             if len(in_shape) != len(e.idx):

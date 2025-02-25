@@ -10,7 +10,15 @@ from .API import (
 from .rewrite.LoopIR_scheduling import SchedulingError
 from .frontend.parse_fragment import ParseFragmentError
 from .core.configs import Config
-from .core.memory import Memory, DRAM
+from .core.memory import (
+    MemWin,
+    Memory,
+    SpecialWindow,
+    DRAM,
+    WindowStructCtx,
+    SpecialWindowFromMemoryCtx,
+    memwin_template,
+)
 from .core.extern import Extern
 
 from . import stdlib
@@ -25,9 +33,14 @@ __all__ = [
     "instr",
     "config",
     "Config",
+    "MemWin",
     "Memory",
-    "Extern",
+    "SpecialWindow",
+    "WindowStructCtx",
+    "SpecialWindowFromMemoryCtx",
+    "memwin_template",
     "DRAM",
+    "Extern",
     "SchedulingError",
     "ParseFragmentError",
     #

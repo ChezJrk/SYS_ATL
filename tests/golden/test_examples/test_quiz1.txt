@@ -30,6 +30,9 @@ extern "C" {
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 
 // vec_double(
 //     N : size,
@@ -53,9 +56,6 @@ void vec_double_optimized( void *ctxt, int_fast32_t N, const float* inp, float* 
 #endif  // TEST_CASE_H
 
 #include "test_case.h"
-
-#include <stdio.h>
-#include <stdlib.h>
 
 // vec_double(
 //     N : size,

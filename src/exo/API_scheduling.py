@@ -1161,6 +1161,7 @@ def set_window(proc, cursor, is_window=True):
     return Procedure(ir, _provenance_eq_Procedure=proc, _forward=fwd)
 
 
+# TODO support SpecialWindow for arg cursor (but not alloc)
 @sched_op([ArgOrAllocCursorA, MemoryA])
 def set_memory(proc, cursor, memory_type):
     """

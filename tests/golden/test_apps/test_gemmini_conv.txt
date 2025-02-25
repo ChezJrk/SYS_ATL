@@ -50,13 +50,9 @@ typedef struct test_case_Context {
     } ConfigStore;
 
 } test_case_Context;
-#ifndef EXO_WIN_2I32
-#define EXO_WIN_2I32
-struct exo_win_2i32{
-    int32_t * const data;
-    const int_fast32_t strides[2];
-};
-#endif
+#include <stdio.h>
+#include <stdlib.h>
+
 #ifndef EXO_WIN_2I32C
 #define EXO_WIN_2I32C
 struct exo_win_2i32c{
@@ -76,13 +72,6 @@ struct exo_win_2i8{
 struct exo_win_2i8c{
     const int8_t * const data;
     const int_fast32_t strides[2];
-};
-#endif
-#ifndef EXO_WIN_3I8
-#define EXO_WIN_3I8
-struct exo_win_3i8{
-    int8_t * const data;
-    const int_fast32_t strides[3];
 };
 #endif
 // conv_17(
@@ -154,13 +143,24 @@ void conv_3_cpu( test_case_Context *ctxt, int8_t* output, const int32_t* bias, c
 
 #include "test_case.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include <include/gemmini.h>
 #include "gemm_acc_malloc.h"
 #include <include/gemmini.h>
 #include "gemm_malloc.h"
+#ifndef EXO_WIN_2I32
+#define EXO_WIN_2I32
+struct exo_win_2i32{
+    int32_t * const data;
+    const int_fast32_t strides[2];
+};
+#endif
+#ifndef EXO_WIN_3I8
+#define EXO_WIN_3I8
+struct exo_win_3i8{
+    int8_t * const data;
+    const int_fast32_t strides[3];
+};
+#endif
 int8_t _relu_int8_t(int8_t x) {
     if (x > 0.0) return x;
     else return 0.0;

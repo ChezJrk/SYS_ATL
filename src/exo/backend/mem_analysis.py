@@ -1,7 +1,7 @@
 from collections import ChainMap
 from ..core.LoopIR import LoopIR
 
-from ..core.memory import Memory
+from ..core.memory import MemWin, Memory, SpecialWindow
 
 
 # --------------------------------------------------------------------------- #
@@ -23,7 +23,7 @@ class MemoryAnalysis:
         for a in proc.args:
             if a.type.is_numeric():
                 mem = a.mem
-                assert issubclass(mem, Memory)
+                assert issubclass(mem, MemWin)
                 self.mem_env[a.name] = mem
 
         self.push()
@@ -134,7 +134,7 @@ class MemoryAnalysis:
 
         elif styp is LoopIR.WindowStmt:
             mem = self.get_e_mem(s.rhs)
-            self.mem_env[s.name] = mem
+            self.mem_env[s.name] = s.special_window or mem
             return s
 
         elif styp is LoopIR.Call:
@@ -142,7 +142,7 @@ class MemoryAnalysis:
             for ca, sa in zip(s.args, s.f.args):
                 if sa.type.is_numeric():
                     smem = sa.mem
-                    assert issubclass(smem, Memory)
+                    assert issubclass(smem, MemWin)
                     cmem = self.get_e_mem(ca)
                     if not issubclass(cmem, smem):
                         raise TypeError(

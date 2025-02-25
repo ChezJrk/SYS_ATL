@@ -16,9 +16,6 @@ def bar2(a: f64 @ DRAM, b: f64 @ DRAM):
 C:
 #include "test.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-
 // bar1(
 //     a : i32 @DRAM,
 //     b : i8 @DRAM

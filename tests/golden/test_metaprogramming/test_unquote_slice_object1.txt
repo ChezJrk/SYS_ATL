@@ -11,9 +11,6 @@ def bar(a: i8[10, 10] @ DRAM):
 C:
 #include "test.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-
 // bar(
 //     a : i8[10, 10] @DRAM
 // )

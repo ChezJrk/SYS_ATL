@@ -30,6 +30,9 @@ extern "C" {
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 
 // gemv(
 //     M : size,
@@ -48,9 +51,6 @@ void gemv( void *ctxt, int_fast32_t M, int_fast32_t N, const float* A, const flo
 #endif  // TEST_CASE_H
 
 #include "test_case.h"
-
-#include <stdio.h>
-#include <stdlib.h>
 
 // gemv(
 //     M : size,

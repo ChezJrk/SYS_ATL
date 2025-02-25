@@ -14,6 +14,7 @@ from ..core.configs import Config
 from ..core.LoopIR import UAST, PAST, front_ops
 from ..core.prelude import *
 from ..core.extern import Extern
+from ..core.memory import MemWin, Memory, SpecialWindow
 
 from typing import Any, Callable, Union, NoReturn, Optional
 import copy
@@ -919,7 +920,15 @@ class Parser:
         else:
             typ = self.parse_num_type(typ_node, is_arg=True)
 
-            mem = self.eval_expr(mem_node) if mem_node else None
+            if mem_node:
+                mem = self.eval_expr(mem_node)
+                if not isinstance(mem, type) or not issubclass(mem, MemWin):
+                    self.err(
+                        node,
+                        "annotation needs to be subclass of Memory or SpecialWindow",
+                    )
+            else:
+                mem = None
 
             return typ, mem
 
@@ -929,6 +938,8 @@ class Parser:
             # x[n] @ DRAM
             # x[n] @ lib.scratch
             mem = self.eval_expr(node.right)
+            if not isinstance(mem, type) or not issubclass(mem, Memory):
+                self.err(node, "expected @mem with mem a subclass of Memory")
             node = node.left
         else:
             mem = None
@@ -1555,7 +1566,8 @@ class Parser:
                     )
 
                 if is_window:
-                    return UAST.WindowExpr(nm, idxs, self.getsrcinfo(e))
+                    # SpecialWindow handled by BinOp parser
+                    return UAST.WindowExpr(nm, idxs, None, self.getsrcinfo(e))
                 else:
                     return UAST.Read(nm, idxs, self.getsrcinfo(e))
 
@@ -1600,6 +1612,20 @@ class Parser:
 
         elif isinstance(e, pyast.BinOp):
             lhs = self.parse_expr(e.left)
+
+            # tensor[idxs...] @ SpecialWindow
+            if (
+                isinstance(e.op, pyast.MatMult)
+                and hasattr(self.AST, "WindowExpr")
+                and isinstance(lhs, self.AST.WindowExpr)
+            ):
+                special_window = self.eval_expr(e.right)
+                if not isinstance(special_window, type) or not issubclass(
+                    special_window, SpecialWindow
+                ):
+                    self.err(e, "expected @win with win a subclass of SpecialWindow")
+                return lhs.update(special_window=special_window)
+
             rhs = self.parse_expr(e.right)
             if isinstance(e.op, pyast.Add):
                 op = "+"

@@ -30,6 +30,9 @@ extern "C" {
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 
 // foo(
 //     n : size,
@@ -45,9 +48,6 @@ void foo( void *ctxt, int_fast32_t n, float* x );
 #endif  // FOO_H
 
 #include "foo.h"
-
-#include <stdio.h>
-#include <stdlib.h>
 
 // foo(
 //     n : size,
@@ -97,6 +97,9 @@ extern "C" {
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 
 // bar(
 //     n : size,
@@ -114,9 +117,6 @@ void bar( void *ctxt, int_fast32_t n, float* y );
 #include "bar.h"
 
 #include "foo.h"
-#include <stdio.h>
-#include <stdlib.h>
-
 // bar(
 //     n : size,
 //     y : f32[n] @DRAM

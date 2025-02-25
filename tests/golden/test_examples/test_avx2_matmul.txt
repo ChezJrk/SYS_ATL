@@ -30,6 +30,9 @@ extern "C" {
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #ifndef EXO_WIN_1F32
 #define EXO_WIN_1F32
 struct exo_win_1f32{
@@ -70,9 +73,20 @@ void rank_k_reduce_6x16_scheduled( void *ctxt, int_fast32_t K, const float* A, c
 #include "test_case.h"
 
 #include <immintrin.h>
-#include <stdio.h>
-#include <stdlib.h>
-
+#ifndef EXO_WIN_1F32_AVX2
+#define EXO_WIN_1F32_AVX2
+struct exo_win_1f32_AVX2{
+    __m256 * const data;
+    const int_fast32_t strides[1];
+};
+#endif
+#ifndef EXO_WIN_1F32C_AVX2
+#define EXO_WIN_1F32C_AVX2
+struct exo_win_1f32c_AVX2{
+    const __m256 * const data;
+    const int_fast32_t strides[1];
+};
+#endif
 
 /* relying on the following instruction..."
 mm256_broadcast_ss(out,val)

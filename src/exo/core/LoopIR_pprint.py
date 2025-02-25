@@ -428,6 +428,8 @@ def _print_stmt(stmt, env: PrintEnv, indent: str) -> list[str]:
 
     elif isinstance(stmt, LoopIR.WindowStmt):
         rhs = _print_expr(stmt.rhs, env)
+        if stmt.special_window is not None:
+            rhs = f"{rhs} @ {stmt.special_window.name()}"
         return [f"{indent}{env.get_name(stmt.name)} = {rhs}"]
 
     elif isinstance(stmt, LoopIR.Alloc):

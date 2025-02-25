@@ -30,6 +30,9 @@ extern "C" {
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #ifndef EXO_WIN_1F32
 #define EXO_WIN_1F32
 struct exo_win_1f32{
@@ -81,9 +84,20 @@ void exo_unsharp_vectorized( void *ctxt, int_fast32_t W, int_fast32_t H, float* 
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-
+#ifndef EXO_WIN_1F32_AVX2
+#define EXO_WIN_1F32_AVX2
+struct exo_win_1f32_AVX2{
+    __m256 * const data;
+    const int_fast32_t strides[1];
+};
+#endif
+#ifndef EXO_WIN_1F32C_AVX2
+#define EXO_WIN_1F32C_AVX2
+struct exo_win_1f32c_AVX2{
+    const __m256 * const data;
+    const int_fast32_t strides[1];
+};
+#endif
 // exo_unsharp(
 //     W : size,
 //     H : size,

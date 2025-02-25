@@ -21,6 +21,9 @@
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #ifndef EXO_WIN_2I8
 #define EXO_WIN_2I8
 struct exo_win_2i8{
@@ -43,9 +46,6 @@ struct exo_win_2i8c{
 // )
 void window( void *ctxt, int_fast32_t n, int_fast32_t m, struct exo_win_2i8c src, struct exo_win_2i8 dst );
 
-
-#include <stdio.h>
-#include <stdlib.h>
 
 // window(
 //     n : size,

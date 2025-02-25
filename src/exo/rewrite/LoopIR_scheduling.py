@@ -901,7 +901,7 @@ def DoInline(call):
 
     def map_bind(nm, a):
         if isinstance(a, LoopIR.WindowExpr):
-            stmt = LoopIR.WindowStmt(nm, a, a.srcinfo)
+            stmt = LoopIR.WindowStmt(nm, a, None, a.srcinfo)
             win_binds.append(stmt)
             return LoopIR.Read(nm, [], a.type, a.srcinfo)
         return a

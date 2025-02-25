@@ -30,6 +30,9 @@ extern "C" {
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 
 // tile_and_fused_blur(
 //     W : size,
@@ -55,9 +58,6 @@ void tile_and_fused_blur_scheduled( void *ctxt, int_fast32_t W, int_fast32_t H, 
 #endif  // TEST_CASE_H
 
 #include "test_case.h"
-
-#include <stdio.h>
-#include <stdlib.h>
 
 // tile_and_fused_blur(
 //     W : size,

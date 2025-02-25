@@ -1,8 +1,5 @@
 #include "test.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include <math.h>
 // foo(
 //     x : i8[16] @DRAM,
@@ -45,6 +42,9 @@ extern "C" {
 #  define EXO_ASSUME(expr) ((void)(expr))
 #endif
 
+
+#include <stdio.h>
+#include <stdlib.h>
 
 
 // foo(

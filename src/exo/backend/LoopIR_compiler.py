@@ -5,11 +5,21 @@ from collections import ChainMap
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import List
 
 from ..core.LoopIR import LoopIR, LoopIR_Do, get_writes_of_stmts, T, CIR
 from ..core.configs import ConfigError
 from .mem_analysis import MemoryAnalysis
-from ..core.memory import MemGenError, Memory, DRAM, StaticMemory
+from ..core.memory import (
+    MemGenError,
+    MemWin,
+    Memory,
+    SpecialWindow,
+    DRAM,
+    StaticMemory,
+    WindowStructCtx,
+    SpecialWindowFromMemoryCtx,
+)
 from .parallel_analysis import ParallelAnalysis
 from .prec_analysis import PrecisionAnalysis
 from ..core.prelude import *
@@ -20,6 +30,16 @@ from ..rewrite.range_analysis import IndexRangeEnvironment
 def sanitize_str(s):
     return re.sub(r"\W", "_", s)
 
+
+T_shorthand = {
+    T.f16: "f16",
+    T.f32: "f32",
+    T.f64: "f64",
+    T.i8: "i8",
+    T.ui8: "ui8",
+    T.ui16: "ui16",
+    T.i32: "i32",
+}
 
 # --------------------------------------------------------------------------- #
 # --------------------------------------------------------------------------- #
@@ -170,16 +190,16 @@ def find_all_subprocs(proc_list):
     return list(reversed(all_procs))
 
 
-class LoopIR_FindMems(LoopIR_Do):
+class LoopIR_FindMemWins(LoopIR_Do):
     def __init__(self, proc):
-        self._mems = set()
+        self._memwins = set()
         for a in proc.args:
             if a.mem:
-                self._mems.add(a.mem)
+                self._memwins.add(a.mem)
         super().__init__(proc)
 
     def result(self):
-        return self._mems
+        return self._memwins
 
     # to improve efficiency
     def do_e(self, e):
@@ -188,7 +208,10 @@ class LoopIR_FindMems(LoopIR_Do):
     def do_s(self, s):
         if isinstance(s, LoopIR.Alloc):
             if s.mem:
-                self._mems.add(s.mem)
+                self._memwins.add(s.mem)
+        elif isinstance(s, LoopIR.WindowStmt):
+            if s.special_window:
+                self._memwins.add(s.special_window)
         else:
             super().do_s(s)
 
@@ -239,12 +262,11 @@ class LoopIR_FindConfigs(LoopIR_Do):
         pass
 
 
-def find_all_mems(proc_list):
-    mems = set()
+def find_all_memwins(proc_list):
+    memwins = set()
     for p in proc_list:
-        mems.update(LoopIR_FindMems(p).result())
-
-    return [m for m in mems]
+        memwins.update(LoopIR_FindMemWins(p).result())
+    return memwins
 
 
 def find_all_externs(proc_list):
@@ -267,50 +289,14 @@ def find_all_configs(proc_list):
 # --------------------------------------------------------------------------- #
 
 
-@dataclass(frozen=True)
+@dataclass
 class WindowStruct:
     name: str
     definition: str
-
-
-@functools.cache
-def _window_struct(typename, ctype, n_dims, is_const) -> WindowStruct:
-    const_kwd = "const " if is_const else ""
-    const_suffix = "c" if is_const else ""
-
-    sname = f"exo_win_{n_dims}{typename}{const_suffix}"
-    sdef = (
-        f"struct {sname}{{\n"
-        f"    {const_kwd}{ctype} * const data;\n"
-        f"    const int_fast32_t strides[{n_dims}];\n"
-        f"}};"
-    )
-
-    sdef_guard = sname.upper()
-    sdef = f"""#ifndef {sdef_guard}
-#define {sdef_guard}
-{sdef}
-#endif"""
-
-    return WindowStruct(sname, sdef)
-
-
-def window_struct(base_type, n_dims, is_const) -> WindowStruct:
-    assert n_dims >= 1
-
-    _window_struct_shorthand = {
-        T.f16: "f16",
-        T.f32: "f32",
-        T.f64: "f64",
-        T.i8: "i8",
-        T.ui8: "ui8",
-        T.ui16: "ui16",
-        T.i32: "i32",
-    }
-
-    return _window_struct(
-        _window_struct_shorthand[base_type], base_type.ctype(), n_dims, is_const
-    )
+    dataptr: str
+    separate_dataptr: bool
+    is_const: bool
+    emit_definition: bool
 
 
 # --------------------------------------------------------------------------- #
@@ -371,11 +357,10 @@ def compile_to_strings(lib_name, proc_list):
 
     # Header contents
     ctxt_name, ctxt_def = _compile_context_struct(find_all_configs(proc_list), lib_name)
-    struct_defns = set()
+    window_struct_cache = WindowStructCache()
     public_fwd_decls = []
 
     # Body contents
-    memory_code = _compile_memories(find_all_mems(proc_list))
     private_fwd_decls = []
     proc_bodies = []
     instrs_global = []
@@ -412,9 +397,10 @@ def compile_to_strings(lib_name, proc_list):
             p = WindowAnalysis().apply_proc(p)
             p = MemoryAnalysis().run(p)
 
-            comp = Compiler(p, ctxt_name, is_public_decl=is_public_decl)
+            comp = Compiler(
+                p, ctxt_name, window_struct_cache, is_public_decl=is_public_decl
+            )
             d, b = comp.comp_top()
-            struct_defns |= comp.struct_defns()
             needed_helpers |= comp.needed_helpers()
 
             if is_public_decl:
@@ -426,8 +412,13 @@ def compile_to_strings(lib_name, proc_list):
 
             analyzed_proc_list.append(p)
 
-    # Structs are just blobs of code... still sort them for output stability
-    struct_defns = [x.definition for x in sorted(struct_defns, key=lambda x: x.name)]
+    # Memories and structs are just blobs of code...
+    # still sort them for output stability
+    header_memwins, header_memwin_code, body_memwin_code = _compile_memwins(proc_list)
+    (
+        header_struct_defns,
+        body_struct_defns,
+    ) = window_struct_cache.sorted_header_body_definitions(header_memwins)
 
     header_contents = f"""
 #include <stdint.h>
@@ -452,7 +443,8 @@ def compile_to_strings(lib_name, proc_list):
 #endif
 
 {from_lines(ctxt_def)}
-{from_lines(struct_defns)}
+{from_lines(header_memwin_code)}
+{from_lines(header_struct_defns)}
 {from_lines(public_fwd_decls)}
 """
 
@@ -462,7 +454,8 @@ def compile_to_strings(lib_name, proc_list):
     body_contents = [
         helper_code,
         instrs_global,
-        memory_code,
+        body_memwin_code,
+        body_struct_defns,
         extern_code,
         private_fwd_decls,
         proc_bodies,
@@ -482,11 +475,25 @@ def _compile_externs(externs):
     return extern_code
 
 
-def _compile_memories(mems):
-    memory_code = []
-    for m in sorted(mems, key=lambda x: x.name()):
-        memory_code.append(m.global_())
-    return memory_code
+def _compile_memwins(proc_list):
+    """Return (header memwin set, header memwin code, C body memwin code)"""
+    all_memwins = find_all_memwins(proc_list)
+
+    # Memories used as part of proc args must be defined in public header
+    header_memwins = set()
+    for p in proc_list:
+        if p.instr is None:
+            for arg in p.args:
+                memwin = arg.mem or DRAM
+                assert memwin in all_memwins
+                header_memwins.add(arg.mem or DRAM)
+
+    header_memwin_code = []
+    body_memwin_code = []
+    for m in sorted(all_memwins, key=lambda x: x.name()):
+        code_list = header_memwin_code if m in header_memwins else body_memwin_code
+        code_list.append(m.global_())
+    return header_memwins, header_memwin_code, body_memwin_code
 
 
 def _compile_context_struct(configs, lib_name):
@@ -522,8 +529,9 @@ def _compile_context_struct(configs, lib_name):
 
 
 class Compiler:
-    def __init__(self, proc, ctxt_name, *, is_public_decl):
+    def __init__(self, proc, ctxt_name, window_struct_cache, *, is_public_decl):
         assert isinstance(proc, LoopIR.proc)
+        assert isinstance(window_struct_cache, WindowStructCache)
 
         self.proc = proc
         self.ctxt_name = ctxt_name
@@ -536,7 +544,7 @@ class Compiler:
         self._lines = []
         self._scalar_refs = set()
         self._needed_helpers = set()
-        self.window_defns = set()
+        self.window_struct_cache = window_struct_cache
         self._known_strides = {}
 
         assert self.proc.name is not None, "expected names for compilation"
@@ -553,25 +561,9 @@ class Compiler:
         for a in proc.args:
             mem = a.mem if a.type.is_numeric() else None
             name_arg = self.new_varname(a.name, typ=a.type, mem=mem)
-            if a.type in (T.size, T.index, T.bool, T.stride):
-                arg_strs.append(f"{a.type.ctype()} {name_arg}")
-                typ_comments.append(f"{name_arg} : {a.type}")
-            # setup, arguments
-            else:
-                assert a.type.is_numeric()
-                assert a.type.basetype() != T.R
-                if a.type.is_real_scalar():
-                    self._scalar_refs.add(a.name)
-                if a.type.is_win():
-                    wintyp = self.get_window_type(a)
-                    arg_strs.append(f"struct {wintyp} {name_arg}")
-                else:
-                    const_kwd = "const " if a.name not in self.non_const else ""
-                    ctyp = a.type.basetype().ctype()
-                    arg_strs.append(f"{const_kwd}{ctyp}* {name_arg}")
-                mem = f" @{a.mem.name()}" if a.mem else ""
-                comment_str = f"{name_arg} : {a.type}{mem}"
-                typ_comments.append(comment_str)
+            if a.type.is_real_scalar():
+                self._scalar_refs.add(a.name)
+            self.append_fnarg_decl(a, name_arg, arg_strs, typ_comments)
 
         for pred in proc.preds:
             if isinstance(pred, LoopIR.Const):
@@ -617,6 +609,43 @@ class Compiler:
         self.proc_decl = proc_decl
         self.proc_def = proc_def
 
+    def append_fnarg_decl(self, a: LoopIR.fnarg, name_arg: str, arg_strs, typ_comments):
+        """Compile a LoopIR.fnarg to C function argument declaration(s).
+
+        Appends function arguments (e.g. `int* foo`) and type comments
+        to the given lists, respectively.
+        Side effect: triggers compilation of memory definitions
+        and window struct declarations as needed.
+        """
+        assert isinstance(a, LoopIR.fnarg)
+        mem = a.mem if a.type.is_numeric() else None
+        if a.type in (T.size, T.index, T.bool, T.stride):
+            arg_strs.append(f"{a.type.ctype()} {name_arg}")
+            typ_comments.append(f"{name_arg} : {a.type}")
+        # setup, arguments
+        else:
+            assert a.type.is_numeric()
+            assert a.type.basetype() != T.R
+            is_const = a.name not in self.non_const
+            if a.type.is_real_scalar():
+                arg_strs.append(
+                    f"{'const ' if is_const else ''}{a.type.ctype()}* {name_arg}"
+                )
+            else:
+                assert a.type.is_tensor_or_window()
+                window_struct = self.get_window_struct(
+                    a, mem or DRAM, is_const, a.type.is_win()
+                )
+                if a.type.is_win():
+                    if window_struct.separate_dataptr:
+                        arg_strs.append(f"{window_struct.dataptr} exo_data_{name_arg}")
+                    arg_strs.append(f"struct {window_struct.name} {name_arg}")
+                else:
+                    arg_strs.append(f"{window_struct.dataptr} {name_arg}")
+            memstr = f" @{a.mem.name()}" if a.mem else ""
+            comment_str = f"{name_arg} : {a.type}{memstr}"
+            typ_comments.append(comment_str)
+
     def static_memory_check(self, proc):
         def allocates_static_memory(stmts):
             check = False
@@ -660,14 +689,16 @@ class Compiler:
     def comp_top(self):
         return self.proc_decl, self.proc_def
 
-    def struct_defns(self):
-        return self.window_defns
-
     def needed_helpers(self):
         return self._needed_helpers
 
     def new_varname(self, symbol, typ, mem=None):
         strnm = str(symbol)
+
+        # Reserve "exo_" prefix for internal use.
+        if strnm.lower().startswith("exo_"):
+            strnm = "exo_user_" + strnm
+
         if strnm not in self.names:
             pass
         else:
@@ -685,6 +716,7 @@ class Compiler:
         self.env[symbol] = strnm
         self.envtyp[symbol] = typ
         if mem is not None:
+            assert issubclass(mem, MemWin)
             self.mems[symbol] = mem
         else:
             self.mems[symbol] = DRAM
@@ -792,6 +824,10 @@ class Compiler:
         else:
             return self.tensor_strides(typ.shape())
 
+    def get_strides_s(self, name: Sym, typ) -> List[str]:
+        all_strides = self.get_strides(name, typ)
+        return [self.comp_cir(simplify_cir(i), self.env, prec=0) for i in all_strides]
+
     def get_idx_offset(self, name: Sym, typ, idx) -> CIR:
         strides = self.get_strides(name, typ)
         assert len(strides) == len(idx)
@@ -802,9 +838,10 @@ class Compiler:
 
         return acc
 
-    def get_window_type(self, typ, is_const=None):
+    def get_window_struct(self, node, mem, is_const=None, emit_definition=True):
+        typ = node.type
         assert isinstance(typ, T.Window) or (
-            isinstance(typ, LoopIR.fnarg) and typ.type.is_win()
+            isinstance(node, LoopIR.fnarg) and typ.is_tensor_or_window()
         )
 
         if isinstance(typ, T.Window):
@@ -814,13 +851,13 @@ class Compiler:
                 is_const = typ.src_buf not in self.non_const
         else:
             base = typ.type.basetype()
-            n_dims = len(typ.type.shape())
+            n_dims = len(typ.shape())
             if is_const is None:
-                is_const = typ.name not in self.non_const
+                is_const = node.name not in self.non_const
 
-        win = window_struct(base, n_dims, is_const)
-        self.window_defns.add(win)
-        return win.name
+        return self.window_struct_cache.get(
+            mem, base, n_dims, is_const, node.srcinfo, emit_definition
+        )
 
     def comp_s(self, s):
         if isinstance(s, LoopIR.Pass):
@@ -843,7 +880,7 @@ class Compiler:
 
                 rhs = f"({lbtyp.ctype()})({rhs})"
 
-            mem: Memory = self.mems[s.name]
+            mem: MemWin = self.mems[s.name]
             if isinstance(s, LoopIR.Assign):
                 self.add_line(mem.write(s, lhs, rhs))
             else:
@@ -870,12 +907,60 @@ class Compiler:
             self.add_line(f"ctxt->{nm}.{s.field} = {rhs};")
 
         elif isinstance(s, LoopIR.WindowStmt):
-            win_struct = self.get_window_type(s.rhs.type)
-            rhs = self.comp_e(s.rhs)
-            assert isinstance(s.rhs, LoopIR.WindowExpr)
-            mem = self.mems[s.rhs.name]
-            name = self.new_varname(s.name, typ=s.rhs.type, mem=mem)
-            self.add_line(f"struct {win_struct} {name} = {rhs};")
+            rhs = s.rhs
+            assert isinstance(rhs, LoopIR.WindowExpr)
+            input_winmem = self.mems[rhs.name]
+            input_win_struct = self.get_window_struct(rhs, input_winmem)
+            (
+                w_type,
+                w_def,
+                d_type,
+                d_def,
+                layout,
+                separate_dataptr,
+            ) = self.unpack_window_expr(rhs, input_winmem, input_win_struct.is_const)
+
+            output_winmem = s.special_window or input_winmem
+            name = self.new_varname(s.name, typ=rhs.type, mem=output_winmem)
+
+            if not s.special_window:
+                output_win_struct = input_win_struct
+            else:
+                # Special case, creating a special window
+                # We pass the temporary expressions from unpack_window_expr to
+                # the SpecialWindow creation callback.
+                assert issubclass(output_winmem, SpecialWindow)
+                assert issubclass(input_winmem, output_winmem.source_memory_type())
+                tensor_type = rhs.type.as_tensor_type()
+                scalar_type = tensor_type.basetype()
+                output_win_struct = self.get_window_struct(rhs, output_winmem)
+                ctx = SpecialWindowFromMemoryCtx(
+                    d_def,
+                    layout,
+                    output_win_struct.dataptr,
+                    output_win_struct.name,
+                    tensor_type,
+                    self.shape_strs(tensor_type.shape()),
+                    output_win_struct.is_const,
+                    scalar_type.ctype(),
+                    T_shorthand[scalar_type],
+                    s.srcinfo,
+                )
+                tmp = output_winmem.from_memory(ctx)
+
+                # Substitute window definition for codegen, replacing temporary window.
+                separate_dataptr = output_winmem.separate_dataptr()
+                if separate_dataptr:
+                    assert len(tmp) == 2
+                    d_def, w_def = tmp
+                else:
+                    assert isinstance(tmp, str)
+                    d_def, w_def = None, tmp
+
+            if separate_dataptr:
+                self.add_line(f"{output_win_struct.dataptr} exo_data_{name} = {d_def};")
+            self.add_line(f"struct {output_win_struct.name} {name} = {w_def};")
+
         elif isinstance(s, LoopIR.If):
             cond = self.comp_e(s.cond)
             self.add_line(f"if ({cond}) {{")
@@ -927,47 +1012,90 @@ class Compiler:
             assert all(
                 a.type.is_win() == fna.type.is_win() for a, fna in zip(s.args, s.f.args)
             )
-            args = [self.comp_fnarg(e, s.f, i) for i, e in enumerate(s.args)]
+            arg_tups = [self.comp_fnarg(e, s.f, i) for i, e in enumerate(s.args)]
             if s.f.instr is not None:
                 d = dict()
-                assert len(s.f.args) == len(args)
-                for i in range(len(args)):
+                assert len(s.f.args) == len(arg_tups)
+                for i in range(len(arg_tups)):
                     arg_name = str(s.f.args[i].name)
-                    d[arg_name] = f"({args[i]})"
+                    c_args, instr_data, instr_layout = arg_tups[i]
                     arg_type = s.args[i].type
                     if arg_type.is_win():
-                        assert isinstance(s.args[i], LoopIR.WindowExpr)
-                        data, _ = self.window_struct_fields(s.args[i])
-                        d[f"{arg_name}_data"] = data
+                        if not isinstance(s.args[i], LoopIR.WindowExpr):
+                            # comp_fnarg requires this for {arg_name}_data
+                            raise TypeError(
+                                f"{s.srcinfo}: Argument {arg_name} must be a "
+                                f"window expression created at the call site "
+                                f"of {s.f.name}"
+                            )
+                        # c_args = (window,) or (dataptr, layout) (depending on
+                        # separate_dataptr); [-1] gets the window/layout
+                        d[arg_name] = f"({c_args[-1]})"
+                        d[f"{arg_name}_data"] = instr_data
+                        d[f"{arg_name}_layout"] = instr_layout
+                        # Special case for AMX instrs
                         d[f"{arg_name}_int"] = self.env[s.args[i].name]
+                        assert instr_data
                     else:
-                        d[f"{arg_name}_data"] = f"({args[i]})"
+                        assert (
+                            len(c_args) == 1
+                        ), "didn't expect multiple c_args for non-window"
+                        arg = f"({c_args[0]})"
+                        d[arg_name] = arg
+                        # Exo 1 does this; unclear why for non-windows
+                        d[f"{arg_name}_data"] = arg
 
                 self.add_line(f"{s.f.instr.c_instr.format(**d)}")
             else:
                 fname = s.f.name
-                args = ["ctxt"] + args
+                args = ["ctxt"]
+                for tups in arg_tups:
+                    c_args = tups[0]
+                    args.extend(c_args)
                 self.add_line(f"{fname}({','.join(args)});")
         else:
             assert False, "bad case"
 
     def comp_fnarg(self, e, fn, i, *, prec=0):
+        """Returns (c_args : tuple,
+                    instr_data : Optional[str],
+                    instr_layout : Optional[str])
+
+        c_args is a tuple (length 1 or 2) of formatted arguments.
+        Length 2 only occurs for separate_dataptr windows: (dataptr, layout).
+
+        instr_data is for formatting c_instr windows; passed as {arg_name}_data.
+        This is needed both for compatibility with Exo 1 and for allowing
+        access to the dataptr when separate_dataptr is True.
+
+        instr_layout is similar, passed as {arg_name}_layout.
+        This is an untyped initializer for the window layout (e.g. strides).
+        """
         if isinstance(e, LoopIR.Read):
             assert not e.idx
             rtyp = self.envtyp[e.name]
             if rtyp.is_indexable():
-                return self.env[e.name]
+                return (self.env[e.name],), None, None
             elif rtyp is T.bool:
-                return self.env[e.name]
+                return (self.env[e.name],), None, None
             elif rtyp is T.stride:
-                return self.env[e.name]
+                return (self.env[e.name],), None, None
             elif e.name in self._scalar_refs:
-                return self.env[e.name]
+                return (self.env[e.name],), None, None
             elif rtyp.is_tensor_or_window():
-                return self.env[e.name]
+                c_window = self.env[e.name]
+                mem = fn.args[i].mem
+                if mem and mem.separate_dataptr():
+                    # This data path is exercised for calling normal
+                    # functions, but the omitted instr_data is only
+                    # used for instr, which can't use this code path.
+                    c_data = "exo_data_" + c_syntax
+                    return (c_data, c_window), None, None
+                else:
+                    return (c_window,), None, None
             else:
                 assert rtyp.is_real_scalar()
-                return f"&{self.env[e.name]}"
+                return (f"&{self.env[e.name]}",), None, None
         elif isinstance(e, LoopIR.WindowExpr):
             if isinstance(fn, LoopIR.proc):
                 callee_buf = fn.args[i].name
@@ -976,11 +1104,15 @@ class Compiler:
                 )
             else:
                 raise NotImplementedError("Passing windows to externs")
-            win_struct = self.get_window_type(e.type, is_const)
-            data, strides = self.window_struct_fields(e)
-            return f"(struct {win_struct}){{ &{data}, {{ {strides} }} }}"
+            _, w_def, _, d_def, layout, separate_dataptr = self.unpack_window_expr(
+                e, self.mems[e.name], is_const
+            )
+            if separate_dataptr:
+                return (d_def, w_def), d_def, layout
+            else:
+                return (w_def,), d_def, layout
         else:
-            return self.comp_e(e, prec)
+            return (self.comp_e(e, prec),), None, None
 
     def comp_e(self, e, prec=0):
         if isinstance(e, LoopIR.Read):
@@ -988,7 +1120,7 @@ class Compiler:
             if rtyp.is_indexable() or rtyp is T.bool or rtyp == T.stride:
                 return self.env[e.name]
 
-            mem: Memory = self.mems[e.name]
+            mem: MemWin = self.mems[e.name]
 
             if not mem.can_read():
                 raise MemGenError(
@@ -1004,9 +1136,12 @@ class Compiler:
                 return self.access_str(e.name, e.idx)
 
         elif isinstance(e, LoopIR.WindowExpr):
-            win_struct = self.get_window_type(e.type)
-            data, strides = self.window_struct_fields(e)
-            return f"(struct {win_struct}){{ &{data}, {{ {strides} }} }}"
+            # WindowExpr needs to be handled differently depending on usage
+            #   * WindowStmt
+            #   * Passing to function
+            #   * Passing to instr
+            # see unpack_window_expr and get strings from there
+            assert 0, "Unexpected standalone WindowExpr"
 
         elif isinstance(e, LoopIR.Const):
             if isinstance(e.val, bool):
@@ -1067,14 +1202,27 @@ class Compiler:
         else:
             assert False, "bad case"
 
-    def _call_static_helper(self, helper, *args):
-        self._needed_helpers.add(helper)
-        return f'{helper}({", ".join(map(str, args))})'
+    def unpack_window_expr(self, e: LoopIR.WindowExpr, src_memwin: type, is_const=None):
+        """(w_type, w_def, d_type, d_def, layout, separate_dataptr)
 
-    def window_struct_fields(self, e):
+        w_type, w_def: C typename and initialization for window struct
+
+        d_type: C typename for data pointer
+
+        d_def: "data" passed through from src_memwin.window(...)
+
+        layout: untyped C braced initializer for layout portion of window
+
+        separate_dataptr: If True, the window is defined with a
+          separate data pointer {d_type} {name} = {d_def}
+        """
+        win_struct = self.get_window_struct(e, src_memwin, is_const)
+        w_type = win_struct.name
+        d_type = win_struct.dataptr
+        separate_dataptr = win_struct.separate_dataptr
+
         base = self.env[e.name]
-        basetyp = self.envtyp[e.name]
-        mem: Memory = self.mems[e.name]
+        basetyp = self.envtyp[e.name].as_tensor_type()
 
         # compute offset to new data pointer
         def w_lo(w):
@@ -1084,13 +1232,144 @@ class Compiler:
         idxs = [self.comp_cir(simplify_cir(i), self.env, prec=0) for i in cirs]
 
         # compute new window strides
-        all_strides = self.get_strides(e.name, basetyp)
-        all_strides_s = [
-            self.comp_cir(simplify_cir(i), self.env, prec=0) for i in all_strides
-        ]
+        all_strides_s = self.get_strides_s(e.name, basetyp)
         assert 0 < len(all_strides_s) == len(e.idx)
-        dataptr = mem.window(basetyp, base, idxs, all_strides_s, e.srcinfo)
-        strides = ", ".join(
-            s for s, w in zip(all_strides_s, e.idx) if isinstance(w, LoopIR.Interval)
+        if separate_dataptr and basetyp.is_win():
+            window_in_expr = "exo_data_" + base, base
+        else:
+            window_in_expr = base
+        callback_result = src_memwin.window(
+            basetyp, window_in_expr, idxs, all_strides_s, e.srcinfo
         )
-        return dataptr, strides
+        if isinstance(callback_result, str):
+            # Base case, no custom layout
+            assert (
+                not separate_dataptr
+            ), "MemWin must define custom layout for separate_dataptr"
+            strides = ", ".join(
+                s
+                for s, w in zip(all_strides_s, e.idx)
+                if isinstance(w, LoopIR.Interval)
+            )
+            layout = f"{{ {strides} }}"
+            d_def = callback_result
+            w_def = f"(struct {w_type}){{ &{d_def}, {layout} }}"
+        else:
+            # Custom layout case
+            assert len(callback_result) == 2
+            d_def, layout = callback_result
+            if separate_dataptr:
+                w_def = f"(struct {w_type}) {layout}"
+            else:
+                w_def = f"(struct {w_type}){{ {d_def}, {layout} }}"  # not &data
+            # This could be an optional MemWin.window_remove_dims(...) callback
+            if any(isinstance(w, LoopIR.Point) for w in e.idx):
+                raise MemGenError(
+                    f"{e.srcinfo}: {src_memwin.name()} window from {e.name} doesn't support removing dimensions (single Point coordinate in window indices)"
+                )
+
+        return w_type, w_def, d_type, d_def, layout, separate_dataptr
+
+    def _call_static_helper(self, helper, *args):
+        self._needed_helpers.add(helper)
+        return f'{helper}({", ".join(map(str, args))})'
+
+
+# --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# Cached collection of window struct definitions
+
+
+class WindowStructCache(object):
+    __slots__ = ["_key_to_name", "_name_to_struct"]
+
+    def __init__(self):
+        self._key_to_name = {}
+        self._name_to_struct = {}
+
+    def _add_to_cache(self, key_tuple, srcinfo) -> WindowStruct:
+        memwin, base_type, n_dims, is_const = key_tuple
+        type_shorthand = T_shorthand[base_type]
+        separate_dataptr = memwin.separate_dataptr()
+
+        ctx = WindowStructCtx(
+            base_type.ctype(),
+            type_shorthand,
+            n_dims,
+            is_const,
+            separate_dataptr,
+            srcinfo,
+        )
+        c_dataptr, c_window = memwin.window_definition(ctx)
+
+        assert isinstance(c_dataptr, str)
+        assert isinstance(c_window, str)
+        assert isinstance(separate_dataptr, bool)
+
+        assert ctx._struct_name is not None, "MemWin didn't name the struct"
+        sname = ctx._struct_name
+
+        self._key_to_name[key_tuple] = sname
+
+        sdef = f"""#ifndef {ctx._guard_macro}
+#define {ctx._guard_macro}
+{c_window}
+#endif"""
+
+        v = self._name_to_struct.get(sname)
+
+        if v is None:
+            v = WindowStruct(
+                ctx._struct_name,
+                sdef,
+                c_dataptr,
+                separate_dataptr,
+                is_const,
+                False,  # emit_definition flag; modified outside this function
+            )
+            self._name_to_struct[sname] = v
+        elif v.definition != sdef:
+            # Since windows are keyed based on MemWin type, and derived MemWin
+            # types inherit an identical window struct if not overriden,
+            # it's valid to have a struct name collision here.
+            # But we validate that the collision is due to a duplicate
+            # identical struct, and not a true name incompatibility.
+            for key_tuple2, sname2 in self._key_to_name.values():
+                if sname2 == sname:
+                    memwin2, base_type2, n_dims2, is_const2 = key_tuple2
+                    type_shorthand2 = T_shorthand[base_type2]
+                    raise ValueError(
+                        f"""Window name collision for {sname}:
+{memwin.name()}, {type_shorthand}, n_dims={n_dims}, is_const={is_const};
+{memwin2.name()}, {type_shorthand2}, n_dims={n_dims2}, is_const={is_const2}"""
+                    )
+
+        return v
+
+    def get(
+        self, memwin, base_type, n_dims, is_const, srcinfo, emit_definition
+    ) -> WindowStruct:
+        key_tuple = (memwin, base_type, n_dims, is_const)
+        sname = self._key_to_name.get(key_tuple)
+        if sname is None:
+            v = self._add_to_cache(key_tuple, srcinfo)
+        else:
+            v = self._name_to_struct[sname]
+        v.emit_definition |= emit_definition
+        return v
+
+    def sorted_header_body_definitions(self, header_memwins):
+        header_snames = set()
+        for key_tuple, sname in self._key_to_name.items():
+            memwin, _, _, _ = key_tuple
+            if memwin in header_memwins:
+                header_snames.add(sname)
+
+        sorted_pairs = sorted(self._name_to_struct.items())
+        h_definitions = []
+        c_definitions = []
+        for sname, struct in sorted_pairs:
+            if struct.emit_definition:
+                lst = h_definitions if sname in header_snames else c_definitions
+                lst.append(struct.definition)
+        return h_definitions, c_definitions

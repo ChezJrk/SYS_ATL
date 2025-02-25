@@ -1,9 +1,6 @@
 #include "bar.h"
 
 #include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 // bar(
 //     n : size,
 //     dst : f32[n] @DRAM,
@@ -50,6 +47,9 @@ extern "C" {
 #  define EXO_ASSUME(expr) ((void)(expr))
 #endif
 
+
+#include <stdio.h>
+#include <stdlib.h>
 
 
 // bar(

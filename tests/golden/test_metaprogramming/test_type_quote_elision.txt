@@ -5,9 +5,6 @@ def foo(a: i8 @ DRAM, x: i8[2] @ DRAM):
 C:
 #include "test.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-
 // foo(
 //     a : i8 @DRAM,
 //     x : i8[2] @DRAM

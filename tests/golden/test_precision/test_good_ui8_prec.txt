@@ -21,6 +21,9 @@
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 
 // hoge(
 //     n : size,
@@ -29,9 +32,6 @@
 // )
 void hoge( void *ctxt, int_fast32_t n, uint8_t* x, const uint8_t* y );
 
-
-#include <stdio.h>
-#include <stdlib.h>
 
 // hoge(
 //     n : size,

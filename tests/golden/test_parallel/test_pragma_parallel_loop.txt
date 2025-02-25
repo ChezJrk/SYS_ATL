@@ -1,8 +1,5 @@
 #include "test.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-
 // foo(
 //     x : i8[10] @DRAM
 // )

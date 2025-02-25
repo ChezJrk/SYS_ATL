@@ -30,6 +30,9 @@ extern "C" {
 #endif
 
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #ifndef EXO_WIN_1F32
 #define EXO_WIN_1F32
 struct exo_win_1f32{
@@ -49,9 +52,6 @@ void caller( void *ctxt );
 #endif
 #endif  // TEST_H
 #include "test.h"
-
-#include <stdio.h>
-#include <stdlib.h>
 
 // callee(
 //     N : size,

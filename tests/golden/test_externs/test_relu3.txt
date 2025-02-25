@@ -1,8 +1,5 @@
 #include "test.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-
 float _relu_float(float x) {
     if (x > 0.0) return x;
     else return 0.0;
@@ -50,6 +47,9 @@ extern "C" {
 #  define EXO_ASSUME(expr) ((void)(expr))
 #endif
 
+
+#include <stdio.h>
+#include <stdlib.h>
 
 
 // foo(
